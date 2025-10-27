@@ -96,8 +96,9 @@ def custom_openapi():
         description="Creates simple PowerPoint decks from JSON input.",
         routes=app.routes,
     )
-    # Set your public Render domain here
-    schema["servers"] = [{"url": "https://slide-agent-xs03.onrender.com"}]
+    schema["servers"] = [
+        {"url": "https://slide-agent-xs03.onrender.com", "description": "Render deployment"}
+    ]
     app.openapi_schema = schema
     return app.openapi_schema
 
