@@ -1,11 +1,12 @@
 # main.py
 # Purpose: expose a web API that builds a .pptx deck and returns a download URL.
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.openapi.utils import get_openapi
+from pydantic import BaseModel, HttpUrl
 from pptx import Presentation
 from pathlib import Path
 import uuid
@@ -38,33 +39,35 @@ class SlideReq(BaseModel):
     title: str
     bullets: list[str]
 
-from fastapi import HTTPException
-from pptx import Presentation
+class SlideResp(BaseModel):
+    file_url: HttpUrl
 
-@app.post("/create_slide")
-def create_slide(req: SlideReq):
+@app.post("/create_slide", response_model=SlideResp)
+def create_slide(req: SlideReq, request: Request):
     try:
         prs = Presentation()
-        # Title + Content layout is usually index 1; fall back if missing
         layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
         slide = prs.slides.add_slide(layout)
 
         # Title
         slide.shapes.title.text = req.title
 
-        # Content placeholder -> bullets
-        # Find the first body/content placeholder robustly
+        # Body bullets (robust)
         body_ph = None
         for ph in slide.placeholders:
             if ph.has_text_frame and ph != slide.shapes.title:
                 body_ph = ph
                 break
         if body_ph is None:
-            raise RuntimeError("No content placeholder with text frame found on this layout")
+            raise HTTPException(status_code=500, detail="No content placeholder found on layout")
 
         tf = body_ph.text_frame
-        # Clear then set first bullet as .text, others as paragraphs
-        tf.clear()
+        # clear any default text
+        try:
+            tf.clear()
+        except AttributeError:
+            tf.text = ""
+
         for i, b in enumerate(req.bullets):
             if i == 0:
                 tf.text = b
@@ -73,15 +76,32 @@ def create_slide(req: SlideReq):
                 p.text = b
                 p.level = 0
 
-        # Save
         fname = f"{uuid.uuid4().hex}.pptx"
         out_path = PUBLIC_DIR / fname
         prs.save(out_path)
 
-        base = "https://slide-agent-xs03.onrender.com"  # temporary for local
-        return {"file_url": f"{base}/public/{fname}"}
+        base = str(request.base_url).rstrip("/")  # works locally and on Render
+        return SlideResp(file_url=f"{base}/public/{fname}")
 
     except Exception as e:
-        # Surface a clear error to /docs while logging the real cause in the console
         print("ERROR /create_slide:", repr(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title="Slide Generator",
+        version="1.0.0",
+        description="Creates simple PowerPoint decks from JSON input.",
+        routes=app.routes,
+    )
+    # Set your public Render domain here
+    schema["servers"] = [{"url": "https://slide-agent-xs03.onrender.com"}]
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+@app.get("/health")
+def health(): return {"ok": True}
