@@ -78,7 +78,7 @@ def create_slide(req: SlideReq):
         out_path = PUBLIC_DIR / fname
         prs.save(out_path)
 
-        base = "http://127.0.0.1:8000"  # temporary for local
+        base = "https://slide-agent-xs03.onrender.com"  # temporary for local
         return {"file_url": f"{base}/public/{fname}"}
 
     except Exception as e:
