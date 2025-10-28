@@ -11,6 +11,7 @@ from pathlib import Path
 import uuid
 from pptx.util import Pt
 from pptx.enum.text import MSO_AUTO_SIZE
+from typing import Optional, Dict, List
 
 app = FastAPI(
     title="Slide Generator",
@@ -42,7 +43,8 @@ def chunk(lst, n):
 # Request schema. Validates incoming JSON.
 class SlideReq(BaseModel):
     title: str
-    slides: dict[str, list[str]]   # <— replace bullets with slides
+    slides: Optional[Dict[str, List[str]]] = None  # new grouped format
+    bullets: Optional[List[str]] = None            # legacy support
 
 class SlideResp(BaseModel):
     file_url: HttpUrl
@@ -51,6 +53,14 @@ class SlideResp(BaseModel):
 @app.post("/create_slide", response_model=SlideResp)
 def create_slide(req: SlideReq, request: Request):
     try:
+        # Normalize input to a slides dict
+        if req.slides is None and req.bullets is not None:
+            slides_dict = {"General": req.bullets}
+        elif req.slides is not None:
+            slides_dict = req.slides
+        else:
+            raise HTTPException(status_code=422, detail="Provide either slides{section:[...]} or bullets[...]")
+
         # tuning knobs
         MAX_PER_SLIDE = 5  # bullets per slide
         BASE_FONT_PT = 24  # normal font size
@@ -66,8 +76,7 @@ def create_slide(req: SlideReq, request: Request):
         except Exception:
             pass
 
-        for subindustry, bullets in req.slides.items():
-            # split long lists across multiple slides
+        for subindustry, bullets in slides_dict.items():            # split long lists across multiple slides
             parts = list(chunk(bullets, MAX_PER_SLIDE))
             total = len(parts)
 
